@@ -9,7 +9,7 @@ User sends an HTTP POST to this server with the user's token and this server wil
 Run the `register` command with the `username` to register and copy the generated token. The token won't be printed again, so don't lose it!
 
 ```bash
-polo register username
+polo add username
 ```
 
 ## Reset a user token
@@ -23,5 +23,9 @@ polo reset username
 ## Start server
 
 ```bash
-polo start [salt]
+polo start
 ```
+
+There is a default salt used if none is specified to make testing/trying easier, but it's recommended to avoid using the default salt because
+1. It can change at any time
+1. It's not a very secure salt

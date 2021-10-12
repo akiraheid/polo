@@ -3,6 +3,7 @@
 import argparse
 import hmac
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
 from os.path import exists
 import random
 import string
@@ -10,9 +11,6 @@ from sys import exit
 
 # File of users and their salted/hashed tokens
 USER_FILE = "users.txt"
-
-# File of salted/hashed tokens and the last reported IP
-IP_FILE = "ips.txt"
 
 SALT = bytes("SnakeCityIjustwannatakeanotherlookatyouwillyouletme", "utf-8")
 
@@ -24,17 +22,43 @@ ips = {}
 
 class HTTPRequestHandler(BaseHTTPRequestHandler):
 
-    def do_POST(self):
-        content_length = int(self.headers["Content-Length"])
-        body = self.rfile.read(content_length)
-        # Use to verify given hash
-        #hamc.compare_digest
-        self.send_response(200)
+    def send(self, code):
+        self.send_response(code)
         self.end_headers()
 
-        print(f"Got {body}")
+    def do_GET(self):
+        self.send(400)
 
-def add(args):
+    def do_POST(self):
+        content_length = int(self.headers["Content-Length"])
+        body = self.rfile.read(content_length).decode("utf-8")
+        try:
+            data = json.loads(body)
+        except json.decoder.JSONDecodeError:
+            self.send(400)
+            return
+
+        if "token" not in data:
+            self.send(400)
+            return
+
+        # Use to verify given hash
+        token = data["token"]
+        hashed_token = generate_hash(token)
+
+        for user in users:
+            possible_hash = users[user]
+            if hmac.compare_digest(hashed_token, possible_hash):
+                ips[possible_hash] = self.address_string()
+                self.send(200)
+                return
+
+        self.send(401)
+
+    def do_PUT(self):
+        self.send(400)
+
+def add_user(args):
     user = args.username
     if user_exists(user):
         print(f"Error: User {user} already exists. Use 'reset' subcommand to change this user's password.")
@@ -42,13 +66,20 @@ def add(args):
 
     parse_hmac_args(args)
     set_user_token(user)
+    write_users()
 
-    with open(USER_FILE, "w") as fp:
-        for user in users:
-            fp.write(f"{user}:{users[user]}")
+def delete_user(args):
+    user = args.username
+    if not user_exists(user):
+        print(f"Error: User {user} does not exist.")
+        exit(1)
+
+    del users[user]
+    write_users()
+    print(f"Deleted {user}")
 
 def generate_token(length):
-    characters = string.ascii_letters + string.digits + string.punctuation
+    characters = string.ascii_letters + string.digits + "!@#$%^&*(),./<>?;:[]{}-_=+"
     characters = characters.strip(":") # Remove character used as delimiter in storage
     return "".join(random.choice(characters) for _ in range(length))
 
@@ -58,36 +89,23 @@ def generate_hash(token):
     obj.update(SALT)
     return obj.hexdigest()
 
-def load_ips(file_path):
-    lines = read_lines(file_path)
-    for line in lines:
-        parts = line.split(":")
-        if len(parts) != 2:
-            print(f"Expected only two parts for {file_path}")
-            exit(1)
-
-        hashed_token = parts[0]
-        ip = parts[1]
-        ips[hashed_token] = ip
-
-    print(f"Loaded {len(lines)} IPs")
+def list_users(args):
+    for user in users:
+        print(user)
 
 def load_users(file_path):
     lines = read_lines(file_path)
-    if len(lines) == 0:
-        print(f"No users to track in {file_path}")
-
     for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
         parts = line.split(":")
         if len(parts) != 2:
             print(f"Expected only two parts for {file_path}")
             exit(1)
 
-        # Don't care about user name when receiving updates
-        #user = parts[0]
         users[parts[0]] = parts[1]
-
-    print(f"Loaded {len(lines)} users")
 
 def parse_hmac_args(args):
     if args.salt:
@@ -99,6 +117,17 @@ def read_lines(file_path):
             return fp.readlines()
 
     return []
+
+def reset_user(args):
+    user = args.username
+    if not user_exists(user):
+        print(f"Error: User {user} does not exist.")
+        exit(1)
+
+    parse_hmac_args(args)
+    print(f"Generating new token for user {user}")
+    set_user_token(user)
+    write_users()
 
 def set_user_token(user):
     token = generate_token(64)
@@ -118,31 +147,42 @@ def start_server(_):
 def user_exists(username):
     return username in users
 
+def write_users():
+    with open(USER_FILE, "w") as fp:
+        for user in users:
+            fp.write(f"{user}:{users[user]}\n")
+
 parser = argparse.ArgumentParser()
-parser.add_argument("-i", "--ip-file", type=str, help="IP file")
+parser.add_argument("-s", "--salt", type=str, help="Salt for hash of token")
 parser.add_argument("-u", "--user-file", type=str, help="User file")
 subparsers = parser.add_subparsers()
+
+parser_add = subparsers.add_parser("add", help="Add a new user")
+parser_add.add_argument("username", type=str, help="User name")
+parser_add.set_defaults(func=add_user)
+
+parser_delete = subparsers.add_parser("delete", help="Delete an existing user")
+parser_delete.add_argument("username", type=str, help="User name")
+parser_delete.set_defaults(func=delete_user)
+
+parser_list = subparsers.add_parser("list", help="List users")
+parser_list.set_defaults(func=list_users)
+
+parser_reset = subparsers.add_parser("reset", help="Reset an existing user")
+parser_reset.add_argument("username", type=str, help="User name")
+parser_reset.set_defaults(func=reset_user)
 
 parser_start = subparsers.add_parser("start", help="Start the server")
 parser_start.set_defaults(func=start_server)
 
-parser_add = subparsers.add_parser("add", help="Add a new user")
-parser_add.set_defaults(func=add)
-parser_add.add_argument("username", type=str, help="User name")
-parser_add.add_argument("-s", "--salt", type=str, help="Salt for hash of token")
-
-#parser_reset = subparsers.add_parser("reset", help="Reset an existing user")
-#parser_delete = subparsers.add_parser("delete", help="Delete an existing user")
-
 args = parser.parse_args()
 
-if args.ip_file:
-    IP_FILE = args.ip_file
+if args.salt:
+    SALT = args.salt
 
 if args.user_file:
     USER_FILE = args.user_file
 
 load_users(USER_FILE)
-load_ips(IP_FILE)
 
 args.func(args)

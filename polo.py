@@ -9,6 +9,9 @@ import random
 import string
 from sys import exit
 
+# File of users and their IPs
+IP_FILE = "ips.txt"
+
 # File of users and their salted/hashed tokens
 USER_FILE = "users.txt"
 
@@ -49,7 +52,10 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         for user in users:
             possible_hash = users[user]
             if hmac.compare_digest(hashed_token, possible_hash):
-                ips[possible_hash] = self.address_string()
+                ip = self.address_string()
+                print(f"{hashed_token} {ip}")
+                ips[possible_hash] = ip
+                write_ips()
                 self.send(200)
                 return
 
@@ -146,6 +152,10 @@ def start_server(_):
 
 def user_exists(username):
     return username in users
+
+def write_ips():
+    with open(IP_FILE, "w") as fp:
+        json.dump(ips, fp)
 
 def write_users():
     with open(USER_FILE, "w") as fp:

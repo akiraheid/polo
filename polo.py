@@ -47,7 +47,7 @@ def generate_token(length):
 
 def generate_hash(token):
     token = bytes(token, "utf-8")
-    obj = hmac.new(token, digestmod="sha3_512")
+    obj = hmac.new(token, digestmod="sha512")
     obj.update(SALT)
     return obj.hexdigest()
 

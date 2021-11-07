@@ -50,7 +50,13 @@ async function parseJSON(req) {
 
 	const jsonStr = Buffer.concat(buffers).toString()
 	console.log(`JSON content\n${jsonStr}`)
-	return JSON.parse(jsonStr)
+	let json = {}
+	try {
+		json = JSON.parse(jsonStr)
+	} catch (e) {
+		console.error(e)
+	}
+	return json
 }
 
 function send(res, statusCode) {
